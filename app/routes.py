@@ -9,21 +9,23 @@ import os
 db.create_all()
 
 
-@app.before_request
-def before_request():
-    g.uuid = '18ae0cd4-2883-420f-8843-78adcf4d38dd'
-    if 'username' in session:
-        #g.uuid = User.query.filter_by(username=session['username']).first().user_uuid
-        g.uuid = '18ae0cd4-2883-420f-8843-78adcf4d38dd'
-
-
 @app.route('/')
 def index():
     return "blah"
 
 
+# Example curl:
+# curl -X post -d '{"Username": "example", "Email": "example@gmail.com", "Password": "password"}' http://127.0.0.1/create_user
 @app.route('/create_user', methods=['POST'])
 def create_user():
+    """Creates a user within the SQL database given a json with a Username, Email, and Password.
+
+    Parameter:
+    (json): json in the format '{"Username": "", "Email": "", "Password": ""}' passed through -d from curl.
+
+    Return:
+    (str): A success or failure message.
+    """
     try:
         user_json = json.loads(request.get_data())
         username = user_json['Username']
@@ -42,11 +44,18 @@ def create_user():
     return "Successfully registered {}".format(username)
 
 
-@app.route('/login', methods=['GET', 'POST'])
+# Example curl:
+# curl -X get -d '{"Username": "example", "Password": "password"}' http://127.0.0.1:5000/login
+@app.route('/login', methods=['GET'])
 def login():
-    if current_user.is_authenticated:
-        return "Already logged in"
+    """Returns a user id when provided with correct credentials.
 
+    Parameter:
+    (json): json in for the format '{"Username": "", "Password": ""} passed through -d from curl.
+
+    Return:
+    (str): Returns message containing user id that must be used to view files.
+    """
     try:
         user_json = json.loads(request.get_data())
         username = user_json['Username']
@@ -55,16 +64,12 @@ def login():
         return "Incorrect json format, please format to '{\"Username\": \"your_username\", \"Password\": \"your_password\"}"
 
     user = check_login(username, password)
-    session['username'] = user.username
+    g.user_uuid = user.user_uuid
 
-    if user is None:
-        return "Invalid username or password"
-
-    return session['username']
-    #return "Successfully logged in {}".format(username)
+    return "User unique id: {}".format(user.user_uuid)
 
 
-@app.route('/test', methods=['GET'])
+@app.route('/test', methods=['GET', 'POST'])
 def blah():
     if 'username' in session:
         return session['username']
@@ -72,15 +77,23 @@ def blah():
         return "Failed"
 
 
+# Example curl:
+# curl -X get -H "Authentication: blah"
+# curl -X post -H "Authentication: blah" -F "file@=/local/file/path.txt"
+# curl -X delete -H "Authentication: blah" -d filename
 @app.route('/files', methods=['GET', 'POST', 'DELETE'])
 def user_file_handler():
-    if g.uuid:
+    """Allows users to view uploaded file information, upload files, and delete files
+    given that they provide correct authentication.
+    """
+    authentication = request.headers.get('Authentication')
+    if User.query.filter_by(user_uuid=authentication).first() is not None:
         if request.method == 'GET':
             file_list_str = ""
-            if len(os.listdir('xtract_user_data/{}'.format(g.uuid))) > 0:
-                for file_name in os.listdir('xtract_user_data/{}'.format(g.uuid)):
+            if len(os.listdir('xtract_user_data/{}'.format(authentication))) > 0:
+                for file_name in os.listdir('xtract_user_data/{}'.format(authentication)):
                     file_list_str += file_name + " {}GB\n".format(os.path.getsize(os.path.join(os.path.join(app.config['UPLOAD_FOLDER'],
-                                                                                                            g.uuid), file_name)) / (10 ** 9))
+                                                                                                            authentication), file_name)) / (10 ** 9))
             else:
                 return "You have no files"
             return file_list_str
@@ -95,18 +108,24 @@ def user_file_handler():
 
             if secure_filename(file.filename) is not '':
                 filename = secure_filename(file.filename)
-                file.save(os.path.join(os.path.join(app.config['UPLOAD_FOLDER'], g.uuid), filename))
+                file.save(os.path.join(os.path.join(app.config['UPLOAD_FOLDER'], authentication), filename))
                 return "Successfully saved {}".format(filename)
             else:
                 return "Bad file name"
 
         elif request.method == 'DELETE':
             filename = request.get_data().decode('utf-8')
-            if os.path.exists(os.path.join(os.path.join(app.config['UPLOAD_FOLDER'], g.uuid), filename)):
-                os.remove(os.path.join(os.path.join(app.config['UPLOAD_FOLDER'], g.uuid), filename))
+            if os.path.exists(os.path.join(os.path.join(app.config['UPLOAD_FOLDER'], authentication), filename)):
+                os.remove(os.path.join(os.path.join(app.config['UPLOAD_FOLDER'], authentication), filename))
                 return "Sucessfully removed {}".format(filename)
             else:
                 return "File does not exist"
+
+    else:
+        return "Invalid credentials"
+
+
+def 
 
 
 
