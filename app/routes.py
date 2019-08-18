@@ -1,8 +1,8 @@
-from flask_login import current_user
 from app.models import generate_user, check_login, User
 from app import app, db
 from flask import request, session, g
 from werkzeug.utils import secure_filename
+from app.docker_handler import extract_metadata
 import json
 import os
 
@@ -78,15 +78,16 @@ def blah():
 
 
 # Example curl:
-# curl -X get -H "Authentication: blah"
-# curl -X post -H "Authentication: blah" -F "file@=/local/file/path.txt"
-# curl -X delete -H "Authentication: blah" -d filename
+# curl -X get -H "Authentication: blah" http://127.0.0.1:5000/files
+# curl -X post -H "Authentication: blah" -F "file=@/local/file/path.txt" http://127.0.0.1:5000/files
+# curl -X delete -H "Authentication: blah" -d filename http://127.0.0.1:5000/files
 @app.route('/files', methods=['GET', 'POST', 'DELETE'])
 def user_file_handler():
     """Allows users to view uploaded file information, upload files, and delete files
     given that they provide correct authentication.
     """
     authentication = request.headers.get('Authentication')
+
     if User.query.filter_by(user_uuid=authentication).first() is not None:
         if request.method == 'GET':
             file_list_str = ""
@@ -125,7 +126,34 @@ def user_file_handler():
         return "Invalid credentials"
 
 
-def 
+# Example curl:
+# curl -X get -H "Authentication: blah" -d '{"Filename": "blah.csv", "Extractor": "tabular"}' http://127.0.0.1:5000/metadata
+@app.route('/metadata', methods=["GET"])
+def user_metadata_handler():
+    authentication = request.headers.get('Authentication')
+    extractor_names = ['tabular', 'jsonxml', 'netcdf', 'keyword', 'image', 'maps', 'matio']
+
+    if User.query.filter_by(user_uuid=authentication).first() is not None:
+        if request.method == "GET":
+            try:
+                user_json = json.loads(request.get_data())
+                filename = user_json['Filename']
+                extractor = user_json['Extractor']
+            except:
+                return "Incorrect json format, please format to '{\"Filename\": \"file_name\", \"Extractor\": \"extractor\"}"
+
+            if extractor in extractor_names:
+                if filename in os.listdir('xtract_user_data/{}'.format(authentication)):
+                    file_path = 'xtract_user_data/{}/{}'.format(authentication, filename)
+
+                    return extract_metadata(extractor, file_path)
+                else:
+                    return "File has not been uploaded"
+            else:
+                return "Invalid extractor name. Valid extractors are {}".format(", ".join(extractor_names))
+
+    else:
+        return "Invalid credentials"
 
 
 

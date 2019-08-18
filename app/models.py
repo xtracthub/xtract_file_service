@@ -1,4 +1,4 @@
-from app import db, login
+from app import db
 import hashlib
 from flask_login import UserMixin
 import uuid
@@ -34,7 +34,6 @@ def check_login(username, password):
     return User.query.filter_by(username=username, password_hash=pass_hasher(password)).first()
 
 
-@login.user_loader
 def load_user(id):
     return User.query.get(int(id))
 
