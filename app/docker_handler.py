@@ -55,7 +55,7 @@ def extract_metadata(extractor, file_path):
     if extractor in extractor_names:
         directory = os.path.abspath(os.path.dirname(file_path))
         file_name = os.path.basename(file_path)
-        
+
         try:
             if extractor in ['tabular', 'jsonxml', 'maps', 'netcdf']:
                 os.chdir("app/dockerfiles/{}".format(extractor))
