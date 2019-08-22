@@ -1,9 +1,8 @@
 from app.models import generate_user, check_login, User, remove_user_data, FileMetadata
-from app.docker_handler import build_all_images
+from app.docker_handler import build_all_images, extract_metadata
 from app import app, db, celery_app
 from flask import request
 from werkzeug.utils import secure_filename
-from app.docker_handler import extract_metadata
 from celery.exceptions import SoftTimeLimitExceeded
 import json
 import os
@@ -158,7 +157,7 @@ def user_file_handler():
                 task = extract_user_metadata.apply_async(args=[file_path, authentication, extractor],
                                                          time_limit=10)
 
-                return "Processing metadata at task id {}. Go to /tasks/<task_id> to view task status\n".format(task.id)
+                return "Processing metadata at task id {}. Go to /tasksto view task status\n".format(task.id)
             else:
                 return "Bad file name\n"
 
@@ -222,7 +221,7 @@ def delete_user_metadata(file_path, authentication):
 
 
 # Example curl:
-# curl -X get -H "Authentication: blah" -H "Filename: blah" http://127.0.0.1:5000/metadata
+# curl -X get -H "Authentication: blah" -d filename http://127.0.0.1:5000/metadata
 # curl -X post -H "Authentication: blah" -d '{"Filename": "blah", "Extractor": "blah"}' http://127.0.0.1:5000/metadata
 # curl -X delete -H "Authentication: blah" -d filename http://127.0.0.1:5000/metadata
 @app.route('/metadata', methods=["GET", "POST", "DELETE"])
@@ -244,7 +243,7 @@ def user_metadata_handler():
     if User.query.filter_by(user_uuid=authentication).first() is not None:
         if request.method == "GET":
             metadata_string = ""
-            file_name = request.headers.get("Filename")
+            file_name = request.get_data().decode('utf-8')
             file_path = "xtract_user_data/{}/{}".format(authentication, file_name)
 
             for metadata in FileMetadata.query.filter_by(file_path=file_path, user_uuid=authentication).all():
@@ -288,22 +287,20 @@ def user_task_handler():
     """
     task_id = request.get_data()
     task = extract_user_metadata.AsyncResult(task_id)
-    return str(task.state)
-    # if task.state == "SUCCESS":
-    #     return "Metadata processing has been completed, go to /metadata to view results\n"
-    # elif task.state == "PENDING":
-    #     return "Task has not been completed yet, check back later\n"
-    # elif task.state == "FAILURE":
-    #     return "Task failed"
-    # else:
-    #     return "IDK"
+
+    if task.state == "SUCCESS":
+        return "Metadata processing has been completed, go to /metadata to view results\n"
+    elif task.state == "PENDING":
+        return "Task has not been completed yet, check back later\n"
+    elif task.state == "FAILURE":
+        return "Task failed"
+    else:
+        return "IDK"
 
 
 @app.route('/')
 def blah():
-    task_id = request.get_data()
-    task = extract_user_metadata.AsyncResult(task_id)
-    return str(task.get())
+    return "blah"
 
 
 

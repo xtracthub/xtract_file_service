@@ -8,6 +8,8 @@ app = Flask(__name__)
 app.config.from_object(Config)
 celery_app = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
 celery_app.conf.update(app.config)
+# argv = ["worker"]
+# celery_app.worker_main(argv=argv)
 db = SQLAlchemy(app)
 
 
