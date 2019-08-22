@@ -81,8 +81,9 @@ def extract_metadata(extractor, file_path):
                 os.chdir(work_dir)
                 return raw_output[last_char:]
 
-        except:
+        except Exception as e:
             os.chdir(work_dir)
+            return e
             return "The {} extractor failed to extract metadata from {}".format(extractor, file_name)
     else:
         return "Not an extractor"

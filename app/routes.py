@@ -1,12 +1,25 @@
 from app.models import generate_user, check_login, User, remove_user_data, FileMetadata
-from app import app, db, celery
+from app.docker_handler import build_all_images
+from app import app, db, celery_app
 from flask import request
 from werkzeug.utils import secure_filename
 from app.docker_handler import extract_metadata
+from celery.exceptions import SoftTimeLimitExceeded
 import json
 import os
 
 db.create_all()
+
+
+@app.before_first_request
+def startup_funcs():
+    """A function that will prep the flask server for our use case."""
+    build_all_images(multiprocess=False)
+
+    try:
+        os.mkdir('xtract_user_data')
+    except:
+        pass
 
 
 # Example curl:
@@ -138,11 +151,12 @@ def user_file_handler():
                 return "{} already exists\n".format(secure_filename(file.filename))
             elif secure_filename(file.filename) is not '':
                 filename = secure_filename(file.filename)
-                file.save("xtract_user_data/{}/{}".format(authentication, filename))
+                file_path = "xtract_user_data/{}/{}".format(authentication, filename)
                 extractor = request.headers.get("Extractor")
 
-                task = extract_user_metadata.delay("xtract_user_data/{}/{}".format(authentication, filename),
-                                                   authentication, extractor)
+                file.save(file_path)
+                task = extract_user_metadata.apply_async(args=[file_path, authentication, extractor],
+                                                         time_limit=10)
 
                 return "Processing metadata at task id {}. Go to /tasks/<task_id> to view task status\n".format(task.id)
             else:
@@ -162,8 +176,8 @@ def user_file_handler():
         return "Invalid credentials\n"
 
 
-@celery.task
-def extract_user_metadata(file_path, authentication, extractor):
+@celery_app.task(bind=True)
+def extract_user_metadata(self, file_path, authentication, extractor):
     """Extracts metadata from a file and writes a FileMetadata objeect to the SQL server.
 
     Parameters:
@@ -176,6 +190,10 @@ def extract_user_metadata(file_path, authentication, extractor):
         return "Incorrect extractor name\n"
 
     metadata_dict = extract_metadata(extractor, file_path)
+
+    if str(metadata_dict) == "SoftTimeLimitExceeded()": # TODO: Figure out why it's returning the error instead of raising it
+        self.retry(soft_time_limit=None)
+
     user = User.query.filter_by(user_uuid=authentication).first()
     file_metadata = FileMetadata(file_path=file_path, metadata_dict=metadata_dict, user=user, extractor=extractor)
     db.session.add(file_metadata)
@@ -193,13 +211,13 @@ def delete_user_metadata(file_path, authentication):
     metadata_to_delete = FileMetadata.query.filter_by(file_path=file_path, user_uuid=authentication).all()
 
     if len(metadata_to_delete) == 0:
-        return "Metadata for {} does not exist".format(os.path.basename(file_path))
+        return "Metadata for {} does not exist\n".format(os.path.basename(file_path))
     else:
         for metadata in metadata_to_delete:
             db.session.delete(metadata)
         db.session.commit()
 
-        return "Successfully deleted metadata for {}".format(os.path.basename(file_path))
+        return "Successfully deleted metadata for {}\n".format(os.path.basename(file_path))
 
 
 
@@ -243,14 +261,14 @@ def user_metadata_handler():
 
             file_path = "xtract_user_data/{}/{}".format(authentication, file_name)
             if FileMetadata.query.filter_by(file_path=file_path, extractor=extractor).first() is None:
-                task = extract_user_metadata.delay("xtract_user_data/{}/{}".format(authentication, file_name),
-                                                   authentication, extractor)
+                task = extract_user_metadata.apply_async(args=[file_path, authentication, extractor],
+                                                         soft_time_limit=10, max_retries=3)
 
-                return "Processing metadata at task id {}. Go to /tasks/<task_id> to view task status\n".format(task.id)
+                return "Processing metadata at task id {}. Go to /tasks to view task status\n".format(task.id)
             else:
                 return "Already processed metadata for this extractor file combo\n"
         elif request.method == "DELETE":
-            file_name = request.headers.get("Filename")
+            file_name = request.get_data().decode('utf-8')
             file_path = "xtract_user_data/{}/{}".format(authentication, file_name)
             return delete_user_metadata(file_path, authentication)
 
@@ -260,7 +278,7 @@ def user_metadata_handler():
 
 
 # Example curl:
-# curl -X get -d task_id http://127.0.0.1:5000/tasks/
+# curl -X get -d task_id http://127.0.0.1:5000/tasks
 @app.route('/tasks', methods=['GET', 'POST'])
 def user_task_handler():
     """Returns the status of a task.
@@ -270,17 +288,22 @@ def user_task_handler():
     """
     task_id = request.get_data()
     task = extract_user_metadata.AsyncResult(task_id)
-
-    if task.state == "SUCCESS":
-        return "Metadata processing has been completed, go to /metadata to view results\n"
-    else:
-        return "Task has not been completed yet, check back later\n"
+    return str(task.state)
+    # if task.state == "SUCCESS":
+    #     return "Metadata processing has been completed, go to /metadata to view results\n"
+    # elif task.state == "PENDING":
+    #     return "Task has not been completed yet, check back later\n"
+    # elif task.state == "FAILURE":
+    #     return "Task failed"
+    # else:
+    #     return "IDK"
 
 
 @app.route('/')
 def blah():
-    i = celery.control.inspect()
-    return str(i.registered())
+    task_id = request.get_data()
+    task = extract_user_metadata.AsyncResult(task_id)
+    return str(task.get())
 
 
 
