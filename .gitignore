@@ -1,5 +1,5 @@
 xtract_user_data/**
 app.db
 .idea/**
-__pyache__/**
-app/__pyache__/**
+__pycache__/**
+app/__pycache__/**
