@@ -9,23 +9,24 @@ purposes.
 
 ### Prerequisites
 - Redis (available [here](https://redis.io/download))
+- Docker (available [here](https://docs.docker.com/install/))
 
 ### Installation
-First, clone this repository and install it's requirements:
+First, clone this repository and activate a virtual environment:
 ```
 git clone https://github.com/rewong03/xtract_file_service
 cd xtract_file_service
-pip install -r requirements.txt
-```
-Next, create a virtual environment and activate it:
-```
 python3 -m venv venv
-virtualenv venv
 source venv/bin/activate
+```
+Next, install the requirements:
+```
+pip install -r requirements.txt
+deactivate
 ```
 
 ### Running XtractHub File Service
-First, open a new terminal and start a redis server:
+First, open a terminal and start a redis server:
 ```
 cd /path/to/redis/
 src/redis-server
@@ -33,16 +34,18 @@ src/redis-server
 Then in a second terminal, start a celery worker:
 ```
 cd /path/to/xtract_file_service/
-celery -A app.celery_app worker
+source venv/bin/activate
+venv/bin/celery -A app.celery_app worker
 ```
 In a third terminal, start the flask app:
 ```
-cd /path/to/xtract_file_service/
-flask run
+cd /path/to/xtract_file_service
+source venv/bin/activate
+venv/bin/flask run
 ```
 
 ## Interacting with the server
-The server is a REST API with no GUI or HTML so all interactions are done using `curl`. This section is documentation of
+The server is a REST API with no GUI or HTML. All interactions are done using `curl`. This section is documentation of
 how to interact with all of the server's features with `curl`.
 
 ### Creating a user

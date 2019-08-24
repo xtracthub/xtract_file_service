@@ -3,3 +3,4 @@ Flask-SQLAlchemy
 Celery
 docker
 Werkzeug
+redis
