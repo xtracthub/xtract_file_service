@@ -125,7 +125,9 @@ curl -X GET -d task_id http://localhost:5000/tasks
 ## Available Extractors:
 tabular:
 - Can process tabular/columnar files (.tsv, .csv, etc.).
-- Returns preamble, headers, and means, medians, modes, max, min for each column.  
+- Returns preamble, headers, and means, medians, modes, max, min for each column. 
+    - Tabular files containing preamble will automatically process the preamble using the
+    keyword extractor. 
 
 keyword:
 - Can process text files.
@@ -134,6 +136,8 @@ keyword:
 jsonxml:
 - Can process .json/.xml style files.
 - Returns depth, headers, columns, and all text found in the file.
+    - Json/xml files containing text will automatically process the text using the keyword
+    extractor. 
 
 netcdf:
 - Can process netcdf style files.
