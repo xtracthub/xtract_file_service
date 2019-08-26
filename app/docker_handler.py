@@ -2,6 +2,7 @@ import docker
 import os
 import subprocess
 import multiprocessing as mp
+from celery.exceptions import SoftTimeLimitExceeded
 
 work_dir = os.getcwd()
 client = docker.from_env()
@@ -14,7 +15,7 @@ def build_image(extractor):
     Parameter:
     extractor (str): Name of the extractor image to build (one of the items from the extractor_names list).
     """
-    client.images.build(path=os.path.join('dockerfiles', extractor), tag="xtract-" + extractor)
+    client.images.build(path=os.path.join('app/dockerfiles', extractor), tag="xtract-" + extractor)
 
 
 def build_all_images(multiprocess=False):
@@ -26,7 +27,7 @@ def build_all_images(multiprocess=False):
     """
     for extractor in extractor_names:
         try:
-            client.images.remove(image="xtract-" + extractor, force=True)
+            client.images.remove("xtract-" + extractor, force=True)
         except:
             pass
     print("Done deleting")
@@ -43,11 +44,13 @@ def build_all_images(multiprocess=False):
 
 
 # The extractors sometimes return extra things such as extraction time so we have to process it oddly
-def extract_metadata(extractor, file_path):
+def extract_metadata(extractor, file_path, cli_args=None):
     """Extracts metadata from a file using only a single extractor.
 
     extractor (str): Extractor name from extractor_names list.
     file_path (str): File path of file to extract metadata from.
+    cli_args (list): Additional command line arguments to pass to the extractor
+    in a list format (e.g. ["--text_string", "string to pass"].
 
     Returns:
     (dict): Dictionary containing metadata.
@@ -57,10 +60,15 @@ def extract_metadata(extractor, file_path):
         file_name = os.path.basename(file_path)
 
         try:
-            if extractor in ['tabular', 'jsonxml', 'maps', 'netcdf']:
-                os.chdir("app/dockerfiles/{}".format(extractor))
-                raw_output = subprocess.check_output(["./run.sh", directory, file_name]).decode('utf-8')
+            os.chdir("app/dockerfiles/{}".format(extractor))
+            cli_command = ["./run.sh", directory, file_name]
 
+            if cli_args is not None:
+                cli_command.extend(cli_args)
+
+            raw_output = subprocess.check_output(cli_command).decode('utf-8')
+
+            if extractor in ['tabular', 'jsonxml', 'maps', 'netcdf']:
                 for idx, char in enumerate(reversed(raw_output)):
                     if char == "}":
                         last_char = idx
@@ -70,9 +78,6 @@ def extract_metadata(extractor, file_path):
                 return raw_output[:len(raw_output) - last_char]
 
             elif extractor in ['keyword', 'image', 'matio']:
-                os.chdir("app/dockerfiles/{}".format(extractor))
-                raw_output = subprocess.check_output(["./run.sh", directory, file_name]).decode('utf-8')
-
                 for idx, char in enumerate(raw_output):
                     if char == "{":
                         last_char = idx
@@ -81,8 +86,9 @@ def extract_metadata(extractor, file_path):
                 os.chdir(work_dir)
                 return raw_output[last_char:]
 
+        except SoftTimeLimitExceeded:
+            raise SoftTimeLimitExceeded
         except:
-            os.chdir(work_dir)
             return "The {} extractor failed to extract metadata from {}".format(extractor, file_name)
     else:
         return "Not an extractor"
