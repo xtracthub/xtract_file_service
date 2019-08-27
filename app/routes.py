@@ -1,14 +1,15 @@
 from app.models import generate_user, check_login, User, remove_user_data, FileMetadata
-from app.docker_handler import build_all_images, extract_metadata
-from app import app, db, celery_app
+from app.docker_handler import build_all_images
+from app import app, db
 from flask import request
 from werkzeug.utils import secure_filename
-from celery.exceptions import SoftTimeLimitExceeded
+from app.metadata_handler import delete_user_metadata, extract_user_metadata
+from app.decompressor import is_compressed, recursive_compression
+from flask import flash
 import json
 import os
-import ast
 
-db.create_all()
+extractor_names = ['tabular', 'jsonxml', 'netcdf', 'keyword', 'image', 'maps', 'matio']
 
 
 @app.before_first_request
@@ -16,6 +17,7 @@ def startup_funcs():
     """A function that will prep the flask server for our use case."""
     import time
     t0 = time.time()
+    db.create_all()
     build_all_images(multiprocess=True)
 
     try:
@@ -134,10 +136,11 @@ def user_file_handler():
         if request.method == 'GET':
             file_list_str = ""
             if len(os.listdir('xtract_user_data/{}'.format(authentication))) > 0:
-                for file_name in os.listdir('xtract_user_data/{}'.format(authentication)):
-                    file_list_str += file_name \
-                                     + " {}GB\n".format(os.path.getsize("xtract_user_data/{}/{}".format(authentication,
-                                                                                                        file_name)) / (10 ** 9))
+                for path, subdirs, files in os.walk('xtract_user_data/{}'.format(authentication)):
+                    for name in files:
+                        file_path = os.path.join(path, name)
+                        file_list_str += file_path[file_path.index(authentication) + len(authentication):] \
+                                         + " {} MB\n".format(os.path.getsize(file_path) / 10 ** 6)
             else:
                 return "You have no files\n"
 
@@ -156,9 +159,15 @@ def user_file_handler():
             elif secure_filename(file.filename) is not '':
                 filename = secure_filename(file.filename)
                 file_path = "xtract_user_data/{}/{}".format(authentication, filename)
-                extractor = request.headers.get("Extractor")
-
+                extractor = request.headers.get("Extractor").lower() if request.headers.get("Extractor") is not None else ""
                 file.save(file_path)
+
+                if is_compressed(file_path):
+                    recursive_compression(file_path, "xtract_user_data/{}".format(authentication))
+
+                if extractor not in extractor_names:
+                    return "File successfully uploaded, but extractor does not exist\n"
+
                 task = extract_user_metadata.apply_async(args=[file_path, authentication, extractor],
                                                          time_limit=10)
 
@@ -178,76 +187,6 @@ def user_file_handler():
 
     else:
         return "Invalid credentials\n"
-
-
-@celery_app.task(bind=True)
-def extract_user_metadata(self, file_path, authentication, extractor, cli_args=None):
-    """Extracts metadata from a file and writes a FileMetadata objeect to the SQL server.
-
-    Parameters:
-    file_path (str): File path of file to extract metadata from.
-    authentication (str): User authentication as returned by login().
-    extractor (str): Name of extractor to use to extract metadata.
-    cli_args (str): Additional command line arguments to pass to the extractors.
-    """
-    print(file_path, authentication, extractor, cli_args)
-    extractor_names = ['tabular', 'jsonxml', 'netcdf', 'keyword', 'image', 'maps', 'matio']
-    if extractor not in extractor_names:
-        return "Incorrect extractor name\n"
-
-    try:
-        metadata_str = extract_metadata(extractor, file_path, cli_args)
-        user = User.query.filter_by(user_uuid=authentication).first()
-        file_metadata = FileMetadata(file_path=file_path, metadata_dict=metadata_str, user=user, extractor=extractor)
-        db.session.add(file_metadata)
-        db.session.commit()
-        try:
-            metadata_dict = ast.literal_eval(metadata_str)
-            if "json/xml" == list(metadata_dict.keys())[0]:
-                for metadata in FileMetadata.query.filter_by(file_path=file_path, user_uuid=authentication,
-                                                             extractor='keyword'):
-                    db.session.delete(metadata)
-                db.session.commit()
-                extract_user_metadata.apply_async(args=[file_path, authentication, "keyword",
-                                                        ["--text_string", metadata_dict["json/xml"]["strings"]]],
-                                                  time_limit=10)
-            elif "tabular" == list(metadata_dict.keys())[0]:
-                for metadata in FileMetadata.query.filter_by(file_path=file_path, user_uuid=authentication,
-                                                             extractor='keyword'):
-                    db.session.delete(metadata)
-                db.session.commit()
-                print(' '.join(metadata_dict["tabular"]["physical"]["preamble"]))
-                extract_user_metadata.apply_async(args=[file_path, authentication, "keyword",
-                                                  ["--text_string",
-                                                   ' '.join(metadata_dict["tabular"]["physical"]["preamble"])]],
-                                                  time_limit=10)
-
-        except:
-            pass
-
-    except SoftTimeLimitExceeded:
-        self.retry(soft_time_limit=None, throw=True)
-
-    return metadata_str
-
-
-def delete_user_metadata(file_path, authentication):
-    """Deletes a users metadata for a given file.
-
-    Parameters:
-    file_path (str): File path of metadata to delete.
-    authentication (str): User authentication as returned by login().
-    """
-    metadata_to_delete = FileMetadata.query.filter_by(file_path=file_path, user_uuid=authentication).all()
-
-    if len(metadata_to_delete) == 0:
-        return "Metadata for {} does not exist\n".format(os.path.basename(file_path))
-    else:
-        for metadata in metadata_to_delete:
-            db.session.delete(metadata)
-        db.session.commit()
-
-        return "Successfully deleted metadata for {}\n".format(os.path.basename(file_path))
 
 
 # Example curl:
@@ -287,7 +226,10 @@ def user_metadata_handler():
             try:
                 extraction_json = json.loads(request.get_data())
                 file_name = extraction_json['Filename']
-                extractor = extraction_json['Extractor']
+                extractor = extraction_json['Extractor'].lower()
+
+                if extractor not in extractor_names:
+                    return "Extractor does not exist\n"
             except:
                 return "Incorrect json format, please format to '{\"Filename\": \"your_file\", \"Extractor\": \"extractor_name\"}'\n"
 
@@ -331,12 +273,3 @@ def user_task_handler():
 @app.route('/')
 def blah():
     return "blah"
-
-
-
-
-
-
-
-
-

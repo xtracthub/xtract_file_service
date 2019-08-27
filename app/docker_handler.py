@@ -22,8 +22,7 @@ def build_all_images(multiprocess=False):
     """Builds all extractor images from the extractor_names list.
 
     Parameter:
-    multiprocess (bool): Whether to build the images in parallel or not. Currently works when used as a standalone
-    function but does not work when implemented in the apps/__init__.py file.
+    multiprocess (bool): Whether to build the images in parallel or not. Not entirely sure if this works.
     """
     for extractor in extractor_names:
         try:
@@ -62,6 +61,7 @@ def extract_metadata(extractor, file_path, cli_args=None):
         try:
             os.chdir("app/dockerfiles/{}".format(extractor))
             cli_command = ["./run.sh", directory, file_name]
+            client.containers.prune()
 
             if cli_args is not None:
                 cli_command.extend(cli_args)
@@ -92,4 +92,7 @@ def extract_metadata(extractor, file_path, cli_args=None):
             return "The {} extractor failed to extract metadata from {}".format(extractor, file_name)
     else:
         return "Not an extractor"
+
+
+
 

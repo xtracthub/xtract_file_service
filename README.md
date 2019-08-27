@@ -35,7 +35,7 @@ Then in a second terminal, start a celery worker:
 ```
 cd /path/to/xtract_file_service/
 source venv/bin/activate
-venv/bin/celery -A app.celery_app worker
+venv/bin/celery -A app.celery_app worker -Q celery,priority
 ```
 In a third terminal, start the flask app:
 ```
@@ -79,6 +79,7 @@ curl -X POST -H "Authentication: your_authentication" -H "Extractor: extractor_n
 metadata.**  
 - This will return a task ID for the metadata processing job, which can be used to view the status of your job. Omitting
 `extractor_name` will still return a task ID but will not result in any metadata being processed.
+- Compressed files will be automatically be decompressed. 
 
 To view uploaded files, run:
 ```

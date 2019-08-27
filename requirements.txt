@@ -4,3 +4,5 @@ Celery
 docker
 Werkzeug
 redis
+pyunpack
+patool
