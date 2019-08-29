@@ -1,6 +1,6 @@
 import docker
 import os
-import subprocess
+import uuid
 import multiprocessing as mp
 from celery.exceptions import SoftTimeLimitExceeded
 
@@ -42,56 +42,40 @@ def build_all_images(multiprocess=False):
     print("Done building")
 
 
-# The extractors sometimes return extra things such as extraction time so we have to process it oddly
-def extract_metadata(extractor, file_path, cli_args=None):
+def extract_metadata(extractor, file_path, cli_args=[]):
     """Extracts metadata from a file using only a single extractor.
 
-    extractor (str): Extractor name from extractor_names list.
-    file_path (str): File path of file to extract metadata from.
-    cli_args (list): Additional command line arguments to pass to the extractor
-    in a list format (e.g. ["--text_string", "string to pass"].
+        extractor (str): Extractor name from extractor_names list.
+        file_path (str): File path of file to extract metadata from.
+        cli_args (list): Additional command line arguments to pass to the extractor
+        in a list format (e.g. ["--text_string", "string to pass"]).
 
-    Returns:
-    (dict): Dictionary containing metadata.
-    """
+        Returns:
+        (dict): Dictionary containing metadata.
+        """
     if extractor in extractor_names:
-        directory = os.path.abspath(os.path.dirname(file_path))
+        directory = os.path.abspath(file_path)
         file_name = os.path.basename(file_path)
+        cli_command = ["--path", directory]
+        cli_command.extend(cli_args)
 
+        if extractor == "image":
+            cli_command = ["--image_path", directory, "--mode", "predict"]
+        container_id = str(uuid.uuid4()) #Containers don't get removed when task is resubmitted, so we need a way to identify the container
         try:
-            os.chdir("app/dockerfiles/{}".format(extractor))
-            cli_command = ["./run.sh", directory, file_name]
-            client.containers.prune()
+            metadata = client.containers.run("xtract-" + extractor, cli_command, auto_remove=False,
+                                             volumes={directory: {"bind": directory}},
+                                             name=container_id).decode('utf-8')
 
-            if cli_args is not None:
-                cli_command.extend(cli_args)
-
-            raw_output = subprocess.check_output(cli_command).decode('utf-8')
-
-            if extractor in ['tabular', 'jsonxml', 'maps', 'netcdf']:
-                for idx, char in enumerate(reversed(raw_output)):
-                    if char == "}":
-                        last_char = idx
-                        break
-
-                os.chdir(work_dir)
-                return raw_output[:len(raw_output) - last_char]
-
-            elif extractor in ['keyword', 'image', 'matio']:
-                for idx, char in enumerate(raw_output):
-                    if char == "{":
-                        last_char = idx
-                        break
-
-                os.chdir(work_dir)
-                return raw_output[last_char:]
-
+            return metadata
         except SoftTimeLimitExceeded:
+            client.containers.get(container_id).remove(v=True, force=True)
             raise SoftTimeLimitExceeded
         except:
             return "The {} extractor failed to extract metadata from {}".format(extractor, file_name)
     else:
         return "Not an extractor"
+
 
 
 

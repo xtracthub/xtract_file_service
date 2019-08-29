@@ -1,15 +1,12 @@
 from app.models import generate_user, check_login, User, remove_user_data, FileMetadata
-from app.docker_handler import build_all_images
+from app.docker_handler import build_all_images, extractor_names
+from app.metadata_handler import delete_user_metadata, extract_user_metadata
+from app.decompressor import is_compressed, recursive_compression
 from app import app, db
 from flask import request
 from werkzeug.utils import secure_filename
-from app.metadata_handler import delete_user_metadata, extract_user_metadata
-from app.decompressor import is_compressed, recursive_compression
-from flask import flash
 import json
 import os
-
-extractor_names = ['tabular', 'jsonxml', 'netcdf', 'keyword', 'image', 'maps', 'matio']
 
 
 @app.before_first_request
@@ -29,7 +26,7 @@ def startup_funcs():
 
 
 # Example curl:
-# curl -X post -d '{"Username": "example", "Email": "example@gmail.com", "Password": "password"}' http://127.0.0.1/create_user
+# curl -X post -d '{"Username": "example", "Email": "example@gmail.com", "Password": "password"}' http://127.0.0.1:5000/create_user
 @app.route('/create_user', methods=['POST'])
 def create_user():
     """Creates a user within the SQL database given a json with a Username, Email, and Password.
@@ -222,6 +219,7 @@ def user_metadata_handler():
                 return "Metadata does not exist\n"
             else:
                 return metadata_string
+
         elif request.method == "POST":
             try:
                 extraction_json = json.loads(request.get_data())
@@ -237,10 +235,10 @@ def user_metadata_handler():
             if FileMetadata.query.filter_by(file_path=file_path, extractor=extractor).first() is None:
                 task = extract_user_metadata.apply_async(args=[file_path, authentication, extractor],
                                                          soft_time_limit=10)
-
                 return "Processing metadata at task id {}. Go to /tasks to view task status\n".format(task.id)
             else:
                 return "Already processed metadata for this extractor file combo\n"
+
         elif request.method == "DELETE":
             file_name = request.get_data().decode('utf-8')
             file_path = "xtract_user_data/{}/{}".format(authentication, file_name)

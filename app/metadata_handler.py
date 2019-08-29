@@ -6,8 +6,8 @@ import os
 import ast
 
 
-@celery_app.task(bind=True)
-def extract_user_metadata(self, file_path, authentication, extractor, cli_args=None):
+@celery_app.task(bind=True, default_retry_delay=0)
+def extract_user_metadata(self, file_path, authentication, extractor, cli_args=[]):
     """Extracts metadata from a file and writes a FileMetadata objeect to the SQL server.
 
     Parameters:
@@ -38,14 +38,13 @@ def extract_user_metadata(self, file_path, authentication, extractor, cli_args=N
                     db.session.delete(metadata)
                 db.session.commit()
                 extract_user_metadata.apply_async(args=[file_path, authentication, "keyword",
-                                                  ["--text_string",
-                                                   ' '.join(metadata_dict["tabular"]["physical"]["preamble"])]],
+                                                  ["--text_string", ' '.join(metadata_dict["tabular"]["physical"]["preamble"])]],
                                                   time_limit=10, queue='priority')
         except:
             pass
 
     except SoftTimeLimitExceeded:
-        self.retry(soft_time_limit=None, throw=True)
+        self.retry(soft_time_limit=None)
 
     return metadata_str
 
