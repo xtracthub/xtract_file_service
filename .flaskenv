@@ -1,1 +1,1 @@
-FLASK_APP=xtract_file_service_main.py
+FLASK_APP=flaskapp.py
